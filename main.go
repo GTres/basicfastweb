@@ -10,6 +10,7 @@ import(
 	// "io/ioutil"
 	// "net/http"
 	"os/exec"
+	"regexp"
 	
 
 	//fasthttp
@@ -37,21 +38,74 @@ type Servers struct {
 	Owner				string		`json:"owner"`
 }
 
-
-
-func whois(ctx *fasthttp.RequestCtx) {
-
+func wi(ctx *fasthttp.RequestCtx)(string){
 	app := "whois"
 	arg := fmt.Sprintf("%v", ctx.UserValue("name"))
 
 	cmd := exec.Command(app, arg)
-	stdout, err :=  cmd.Output()
+	whois, err :=  cmd.Output()
 	if err != nil {
 		fmt.Println(err.Error())
+	}
+	return string(whois)
+}
+
+
+
+func whois(ctx *fasthttp.RequestCtx) {
+
+	// app := "whois"
+	// arg := fmt.Sprintf("%v", ctx.UserValue("name"))
+
+	// cmd := exec.Command(app, arg)
+	// whoisStdout, err :=  cmd.Output()
+	// if err != nil {
+	// 	fmt.Println(err.Error())
+	// 	return
+	// }
+	whoisStdout := wi(ctx)
+	
+	// r, errReg := regexp.Compile(`country:\s+[A-Z]{2}`)
+	// rCountryInitials, _ := regexp.Compile(`[A-Z]{2}$`)
+
+
+
+	// rOwner, errReg := regexp.Compile(`[rR]egistrant Organization:\s+[\w\#\(\)\.\,\-\\]*`)
+	// rOwner, errReg := regexp.Compile(`registrant organization:.*$|registrar:.*/i`)
+	// rOwner, errReg1 := regexp.Compile(`([rR]egistrar:.*)|([rR]egistrant [oO]rganization:.*)`)
+	rOwner, errReg1 := regexp.Compile(`(?:[rR]egistrant [oO]rganization:)\s*(.*)`)
+	rCountry, errReg := regexp.Compile(`(?:[cC]ountry:)\s+([A-Z]{2})`)
+	if errReg != nil {
+		fmt.Println(errReg.Error())
 		return
 	}
-	
-	fmt.Fprintf(ctx, "out:\n%s", stdout)
+	if errReg1 != nil {
+		fmt.Println(errReg1.Error())
+		return
+	}
+	fmt.Println(rOwner)
+
+
+	// fmt.Fprintln(ctx, "rOwner:", rOwner)
+	// strOwner := rOwner.FindString(string(whoisStdout))
+	strOwner := rOwner.FindAllStringSubmatch(string(whoisStdout),-1)[0][1]
+	// fmt.Fprintln(ctx, "len:", len(strOwner[0]))
+	strCountry := string(rCountry.FindAllStringSubmatch(string(whoisStdout), -1)[0][1])
+
+	// strCountry := rCountryInitials.FindString(rCountry.FindString(string(whoisStdout)))
+
+	fmt.Fprintln(ctx, "Dueño:", strOwner)
+	fmt.Fprintln(ctx, "Pais:", strCountry)
+
+	// fmt.Fprintln(ctx, string(whoisStdout))
+	fmt.Fprintln(ctx, rCountry.MatchString(string(whoisStdout)))
+	fmt.Fprintln(ctx, rCountry.FindString(string(whoisStdout)))
+	fmt.Fprintln(ctx, strCountry)
+	fmt.Fprintln(ctx, "\nOwnerr")
+	fmt.Fprintln(ctx, strOwner)
+	fmt.Println(errReg1)
+
+	// fmt.Fprintf(ctx, "out:\n%s", stdout)
 }
 
 func doRequest(ctx *fasthttp.RequestCtx) {
