@@ -28,115 +28,117 @@ type Server struct {
 	Logo				string		`json:"logo,omitempty"`
 	Title				string		`json:"title,omitempty"`
 	Is_Down				bool		`json:"is_down,omitempty"`
-	Endpoints			[]Servers	`json:"endpoints"`
+	EndPoints			[]EndPoint	`json:"endpoints"`
 }
 
-type Servers struct {
+type EndPoint struct {
 	Address				string		`json:"ipAddress"`
-	Ssl_grade			string		`json:"grade"`
+	Ssl_Grade			string		`json:"grade"`
 	Country				string		`json:"country"`
 	Owner				string		`json:"owner"`
 }
 
-func wi(ctx *fasthttp.RequestCtx)(string){
-	app := "whois"
-	arg := fmt.Sprintf("%v", ctx.UserValue("name"))
 
-	cmd := exec.Command(app, arg)
-	whois, err :=  cmd.Output()
+func Whois(address string) (owner string, country string){
+	whoisstring := ""
+	
+	expressionhost, err := regexp.Compile(`(https?://)?(www\.)?(.*)`)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
-	return string(whois)
+
+	argumentcut := expressionhost.FindAllStringSubmatch(string(address), -1)
+	if len(argumentcut) > 0 {
+		// host := s.Address // Usar la direccion de los endpoints
+		host := argumentcut[0][len(argumentcut[0])-1]
+		app := "whois"
+		wohiscommand := exec.Command(app, host)
+
+		whoisoutput, err :=  wohiscommand.Output()
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		whoisstring = string(whoisoutput)
+		if whoisstring != "" {
+			owner = FindInformation(whoisstring, `(?P<t>[oO]rg-?[nN]ame:)(?P<s>\s*)(?P<o>.*)`, "o")
+			country = FindInformation(whoisstring, `(?P<t>[cC]ountry:)(?P<s>\s+)(?P<c>[A-Z]{2})`, "c")
+		}
+	}
+	return owner, country
+}
+
+// Bucar en un string la expresion regular indicada.
+func FindInformation(str, expression, group string) (information string) {
+		compileexpression, err := regexp.Compile(expression)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		
+		match := compileexpression.FindStringSubmatch(string(str))
+		result := make(map[string]string)
+		subname := compileexpression.SubexpNames()
+		if len(match) > 0 {
+			for i, name := range subname {
+				if i != 0 && name != "" {
+					result[name] = match[i]
+				}
+			}
+			if len(subname)>0 {
+				information = result[group]
+			}
+		}
+		return information
 }
 
 
+// Buscar el logo de pagina de host indicado en el request.
+func FindLogo(ctx *fasthttp.RequestCtx) (logo string) {
+	addresshost := ctx.QueryArgs().Peek("address")
+	host := fmt.Sprintf("%v", string(addresshost))
 
-func whois(ctx *fasthttp.RequestCtx) {
+	if len(host) > 0 {		
+		curlcommand := exec.Command("curl", host)
+		html, err :=  curlcommand.Output()
+		if err != nil {
+			fmt.Println(err.Error())
+		}
 
-	// app := "whois"
-	// arg := fmt.Sprintf("%v", ctx.UserValue("name"))
-
-	// cmd := exec.Command(app, arg)
-	// whoisStdout, err :=  cmd.Output()
-	// if err != nil {
-	// 	fmt.Println(err.Error())
-	// 	return
-	// }
-	whoisStdout := wi(ctx)
-	
-	// r, errReg := regexp.Compile(`country:\s+[A-Z]{2}`)
-	// rCountryInitials, _ := regexp.Compile(`[A-Z]{2}$`)
-
-
-
-	// rOwner, errReg := regexp.Compile(`[rR]egistrant Organization:\s+[\w\#\(\)\.\,\-\\]*`)
-	// rOwner, errReg := regexp.Compile(`registrant organization:.*$|registrar:.*/i`)
-	// rOwner, errReg1 := regexp.Compile(`([rR]egistrar:.*)|([rR]egistrant [oO]rganization:.*)`)
-	rOwner, errReg1 := regexp.Compile(`(?:[rR]egistrant [oO]rganization:)\s*(.*)`)
-	rCountry, errReg := regexp.Compile(`(?:[cC]ountry:)\s+([A-Z]{2})`)
-	if errReg != nil {
-		fmt.Println(errReg.Error())
-		return
+		compileexpression, err := regexp.Compile(`https?\S*(logo)?\S*\.png`)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		
+		logo = compileexpression.FindString(string(html))
+		fmt.Println("Logo:",logo)
 	}
-	if errReg1 != nil {
-		fmt.Println(errReg1.Error())
-		return
-	}
-	fmt.Println(rOwner)
-
-
-	// fmt.Fprintln(ctx, "rOwner:", rOwner)
-	// strOwner := rOwner.FindString(string(whoisStdout))
-	strOwner := rOwner.FindAllStringSubmatch(string(whoisStdout),-1)[0][1]
-	// fmt.Fprintln(ctx, "len:", len(strOwner[0]))
-	strCountry := string(rCountry.FindAllStringSubmatch(string(whoisStdout), -1)[0][1])
-
-	// strCountry := rCountryInitials.FindString(rCountry.FindString(string(whoisStdout)))
-
-	fmt.Fprintln(ctx, "Dueño:", strOwner)
-	fmt.Fprintln(ctx, "Pais:", strCountry)
-
-	// fmt.Fprintln(ctx, string(whoisStdout))
-	fmt.Fprintln(ctx, rCountry.MatchString(string(whoisStdout)))
-	fmt.Fprintln(ctx, rCountry.FindString(string(whoisStdout)))
-	fmt.Fprintln(ctx, strCountry)
-	fmt.Fprintln(ctx, "\nOwnerr")
-	fmt.Fprintln(ctx, strOwner)
-	fmt.Println(errReg1)
-
-	// fmt.Fprintf(ctx, "out:\n%s", stdout)
+	return logo
 }
 
+// Procesar el request.
 func doRequest(ctx *fasthttp.RequestCtx) {
 	ssllab  := "https://api.ssllabs.com/api/v3/analyze?host="
-	url := fmt.Sprintf("%v%v", ssllab, ctx.UserValue("name"))
+	a := ctx.QueryArgs().Peek("address")
+	h := fmt.Sprintf("%v", string(a))
+	url := fmt.Sprintf("%v%v", ssllab, h)
 
-	// output := fmt.Sprintf("%s%s","https://api.ssllabs.com/api/v3/analyze?host=", url)
 
 	req := fasthttp.AcquireRequest()
 	req.SetRequestURI(url)
-
 	resp := fasthttp.AcquireResponse()
 
 	err := fasthttp.Do(req, resp)
-
 	if err != nil {
 		fmt.Print(ctx, err.Error())
-		// os.Exit(1)
 	}
 	
-	// query := ctx.QueryArgs().Peek(serverName)
-
 	bodyBytes := resp.Body()
 
 	var s Server
 	json.Unmarshal(bodyBytes, &s)
 
-	// for i := 0; i < len(responseObject); i++ {
-		// fmt.Fprintln(ctx, responseObject.host)
-	// }
 	// fmt.Println("\nResponse")
+	s.Logo = FindLogo(ctx)
+	fmt.Fprintln(ctx, "logo listo")
 	fmt.Fprintln(ctx, s)
 	fmt.Fprintln(ctx, "Host:", s.Host)
 	fmt.Fprintln(ctx, "Server changed:", s.Server_Changed)
@@ -145,57 +147,70 @@ func doRequest(ctx *fasthttp.RequestCtx) {
 	fmt.Fprintln(ctx, "Logo:", s.Logo)
 	fmt.Fprintln(ctx, "Title:", s.Title)
 	fmt.Fprintln(ctx, "Is down:", s.Is_Down)
-
-	fmt.Fprintln(ctx, s.Endpoints)
-	fmt.Fprintln(ctx, "Endpoints:", len(s.Endpoints))
-	for i := 0; i < len(s.Endpoints); i++ {
-		fmt.Fprintln(ctx, "\nEndpoint: %d",i+1)
-		fmt.Fprintln(ctx, "Address:", 	s.Endpoints[i].Address)
-		fmt.Fprintln(ctx, "Ssl grade:", s.Endpoints[i].Ssl_grade)
-		fmt.Fprintln(ctx, "Country:", 	s.Endpoints[i].Country)
-		fmt.Fprintln(ctx, "Owner:", 	s.Endpoints[i].Owner)
-	}
-
-	// fmt.Println("Host: %s",responseObject[0])
-
-
-	// var s interface{}
-	// // var s Server
-	// b := resp.Body()
-	// json.Unmarshal(b, &s)
 	
 
+	sj := make(map[string]interface{})
+	sj["Host"] = s.Host
+	
 
-	// m := s.(map[string]interface{})
-	// // m["servers"].(map[string]interface{})[]
-	// fmt.Fprintln(ctx, m)
-	// fmt.Fprintln(ctx, "Host:", m["host"])
-	// fmt.Fprintln(ctx, "Protocol:", m["protocol"])
-	// fmt.Fprintln(ctx, "Servers_changed:", m["servers_changed"])
-	// fmt.Fprintln(ctx, "Ssl_grade:", m["ssl"])
-	// fmt.Fprintln(ctx, "Previous_ssl_grade:", m["previous_ssl_grade"])
-	// fmt.Fprintln(ctx, "Logo:", m["logo"])
-	// fmt.Fprintln(ctx, "Title:", m["title"])
-	// fmt.Fprintln(ctx, "Down:", m["is_down"])
-	// fmt.Fprintln(ctx, "ssl_grade:", m["endpoints"].(map[string]interface{})["grade"])
+	fmt.Fprintln(ctx, s.EndPoints)
+	fmt.Fprintln(ctx, "EndPoints:", len(s.EndPoints))
+	// type Points []EndPoint
+	var points []EndPoint
+	for i := 0; i < len(s.EndPoints); i++ {
+		// s.EndPoints[i].FindOwner(ctx)
+		// s.EndPoints[i].FindCountry(ctx)
+		s.EndPoints[i].Owner, s.EndPoints[i].Country = Whois(s.EndPoints[i].Address)
+		fmt.Fprintln(ctx, "\nEndpoint: %d",i+1)
+		fmt.Fprintln(ctx, "Address:", 	s.EndPoints[i].Address)
+		fmt.Fprintln(ctx, "Ssl grade:", s.EndPoints[i].Ssl_Grade)
+		fmt.Fprintln(ctx, "Country:", 	s.EndPoints[i].Country)
+		fmt.Fprintln(ctx, "Owner:", 	s.EndPoints[i].Owner)
+		// response.EndPoint[i]{
+		// 	Address:s.Endpoints[i].Address,
+		// 	Ssl_Grade:s.Endpoints[i].Ssl_Grade,
+		// 	Country:s.Endpoints[i].Country,
+		// 	Owner:s.Endpoints[i].Owner
+		// }
+		// sj["Endpoints"][i] = map[string]interface{}[]{
+		// 	"Address": s.EndPoints[i].Address,
+		// 	"Country": s.EndPoints[i].Country,
+		// }
 
+		points[i] = EndPoint {
+				Address: s.EndPoints[i].Address,
+				Ssl_Grade: s.EndPoints[i].Ssl_Grade,
+				Country: s.EndPoints[i].Country,
+				Owner: s.EndPoints[i].Owner}
+	}
 
-	// for k,v := range  {
-	// 	fmt.Println()
-	// 	switch vv := v.(type){
-	// 	case string:
-	// 		fmt.Println(k, "is string", vv)
-	// 	case int:
-	// 		fmt.Println(k, "is int", vv)
-	// 	case []interface{}:
-	// 		fmt.Println(k, "is an array:")
-	// 		for i, u := range vv {
-	// 			fmt.Println(i, u)
-	// 		}
-	// 	default:
-	// 		fmt.Println(k, "is of a type I don't know how to handble")
-	// 	}
-	// }
+	response := Server{
+		Host:s.Host, 
+		Server_Changed:s.Server_Changed,
+		Ssl_Grade:s.Ssl_Grade,
+		Previous_Ssl_Grade:s.Previous_Ssl_Grade,
+		Logo:s.Logo,
+		Title:s.Title,
+		Is_Down:s.Is_Down,
+		EndPoints:points}
+
+	datatoresponse, err := json.MarshalIndent(response, "", "    ")
+	if err != nil {
+		fmt.Print(ctx, err.Error())
+	}
+	// d := fmt.Sprintln(datatoresponse)
+	fmt.Println("%s\n", string(datatoresponse))
+
+	
+
+	type Employee struct {
+		Name string
+		Age int
+		Salary int
+	}
+	emp_obj := Employee{Name:"Rachel", Age:24, Salary :344444}
+	emp, _ := json.Marshal(emp_obj)
+	fmt.Println(string(emp))
 }
 
 func Index(ctx *fasthttp.RequestCtx) {
@@ -203,16 +218,35 @@ func Index(ctx *fasthttp.RequestCtx) {
 }
 
 func Hello(ctx *fasthttp.RequestCtx) {
-	// fmt.Println(str)
-	// fmt.Fprintf(ctx, str)
-	// fmt.Fprintf(ctx, "hello, %s!\n", ps.ByName("name"))
-	// fmt.Fprintf(ctx, "hello, %s!\n", ctx.UserValue("name"))
-	// u := fmt.Sprintf(ctx.UserValue("serverName"))
-	// doRequest(ctx, "https://pokeapi.co/api/v2/pokedex/kanto/")
-	// doRequest(ctx, "https://api.ssllabs.com/api/v3/analyze?host=google.com")
-	// doRequest(ctx, ps.ByName("serverName"))
 	doRequest(ctx)
-	whois(ctx)
+}
+
+func (s Server) L(ctx *fasthttp.RequestCtx) {
+	h := ctx.QueryArgs().Peek("address")
+	// fmt.Fprintln(ctx, string(ad))
+
+
+	app := "curl"
+	arg := fmt.Sprintf("%v", string(h))
+	cmd := exec.Command(app, arg)
+	exec, _ :=  cmd.Output()
+	// fmt.Fprintln(ctx, string(logo))
+
+	regLogo, err := regexp.Compile(`http[s?]\S*[logo?]\S*\.png`)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	//strLogo, err := string(regCountry.FindAllStringSubmatch(string(logo), -1)[0][0])
+	findLogo  := regLogo.FindAllStringSubmatch(string(exec), -1)
+	fmt.Fprintln(ctx, len(findLogo))
+	if len(findLogo) > 0 {
+		s.Logo = string(findLogo[0][0])
+	}
+	if err!= nil {
+		fmt.Println(err.Error())
+	}
+	// fmt.Fprintln(ctx, string(strLogo))
+	
 }
 
 func main() {
@@ -222,6 +256,7 @@ func main() {
 	router := fasthttprouter.New()
 	router.GET("/", Index)
 	router.GET("/server/:name", Hello)
+	router.GET("/par/est", Hello)
 
 	log.Fatal(fasthttp.ListenAndServe(":8080", router.Handler))
 }
