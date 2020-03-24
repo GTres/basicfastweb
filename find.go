@@ -9,9 +9,8 @@ import(
 	"github.com/valyala/fasthttp"
 )
 
+
 func Whois(address string) (owner string, country string){
-	whoisstring := ""
-	
 	expressionhost, err := regexp.Compile(`(https?://)?(www\.)?(.*)`)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -28,41 +27,44 @@ func Whois(address string) (owner string, country string){
 		if err != nil {
 			fmt.Println(err.Error())
 		}
-		whoisstring = string(whoisoutput)
+
+		whoisstring := string(whoisoutput)
 		if whoisstring != "" {
 			owner = FindInformation(whoisstring, `(?P<t>[oO]rg-?[nN]ame:)(?P<s>\s*)(?P<o>.*)`, "o")
 			country = FindInformation(whoisstring, `(?P<t>[cC]ountry:)(?P<s>\s+)(?P<c>[A-Z]{2})`, "c")
 		}
 	}
+
 	return owner, country
 }
 
-// Bucar en un string la expresion regular indicada.
+
 func FindInformation(str, expression, group string) (information string) {
-		compileexpression, err := regexp.Compile(expression)
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-		
-		match := compileexpression.FindStringSubmatch(string(str))
-		result := make(map[string]string)
-		subname := compileexpression.SubexpNames()
-		if len(match) > 0 {
-			for i, name := range subname {
-				if i != 0 && name != "" {
-					result[name] = match[i]
-				}
-			}
-			if len(subname)>0 {
-				information = result[group]
+	compileexpression, err := regexp.Compile(expression)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	match := compileexpression.FindStringSubmatch(string(str))
+	result := make(map[string]string)
+	subname := compileexpression.SubexpNames()
+
+	if len(match) > 0 {
+		for i, name := range subname {
+			if i != 0 && name != "" {
+				result[name] = match[i]
 			}
 		}
-		return information
+		if len(subname)>0 {
+			information = result[group]
+		}
+	}
+
+	return information
 }
 
 
-// Buscar el logo de pagina de host indicado en el request.
-func FindLogo(ctx *fasthttp.RequestCtx) (logo string) {
+func LookLogoAndTitleInHTML(ctx *fasthttp.RequestCtx) (logo string, title string) {
 	addresshost := ctx.QueryArgs().Peek("address")
 	host := fmt.Sprintf("%v", string(addresshost))
 
@@ -73,17 +75,41 @@ func FindLogo(ctx *fasthttp.RequestCtx) (logo string) {
 			fmt.Println(err.Error())
 		}
 
-		compileexpression, err := regexp.Compile(`https?\S*(logo)?\S*\.png`)
+		logoexpression, err := regexp.Compile(`https?\S*(logo)?\S*\.png`)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+
+		// titleexpression, err := regexp.Compile(`(?P<t1>\<title\>)(?P<t2>.*)(?P<t3>\</title\>)`)
+		titleexpression, err := regexp.Compile(`(?P<t1><title>)(?P<t2>.*)(?P<t3></title>)`)
 		if err != nil {
 			fmt.Println(err.Error())
 		}
 		
-		logo = compileexpression.FindString(string(html))
+		logo = logoexpression.FindString(string(html))
+
+
+		match := titleexpression.FindStringSubmatch(string(html))
+		result := make(map[string]string)
+		subname := titleexpression.SubexpNames()
+
+		if len(match) > 0 {
+			for i, name := range subname {
+				if i != 0 && name != "" {
+					result[name] = match[i]
+				}
+			}
+			if len(subname)>0 {
+				title = result["t2"]
+			}
+		}
 	}
-	return logo
+	return logo, title
 }
 
-// Procesar el request.
+
+
+
 func doRequest(ctx *fasthttp.RequestCtx) (Server) {
 	ssllab  := "https://api.ssllabs.com/api/v3/analyze?host="
 	a := ctx.QueryArgs().Peek("address")
@@ -101,31 +127,13 @@ func doRequest(ctx *fasthttp.RequestCtx) (Server) {
 	}
 	
 	bodyBytes := resp.Body()
-
 	var s Server
 	json.Unmarshal(bodyBytes, &s)
 
-	s.Logo = FindLogo(ctx)
-
-	var points []EndPoint
+	s.Logo, s.Title = LookLogoAndTitleInHTML(ctx)
 	for i := 0; i < len(s.EndPoints); i++ {
 		s.EndPoints[i].Owner, s.EndPoints[i].Country = Whois(s.EndPoints[i].Address)
-
-		points[i] = EndPoint {
-				Address: s.EndPoints[i].Address,
-				Ssl_Grade: s.EndPoints[i].Ssl_Grade,
-				Country: s.EndPoints[i].Country,
-				Owner: s.EndPoints[i].Owner}
 	}
 
-	dataserver := Server{
-		Host:s.Host, 
-		Server_Changed:s.Server_Changed,
-		Ssl_Grade:s.Ssl_Grade,
-		Previous_Ssl_Grade:s.Previous_Ssl_Grade,
-		Logo:s.Logo,
-		Title:s.Title,
-		Is_Down:s.Is_Down,
-		EndPoints:points}
-	return dataserver
+	return s
 }
